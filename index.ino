@@ -13,10 +13,11 @@ void powerOff()
 void statusUpdate(unsigned long tick)
 {
   if (tick % 60 == 0) {
-    int8_t battery = getBattery();
+    // int8_t battery = getBattery();
+    float battery = M5.Axp.GetBatVoltage();
     M5.Lcd.fillRect(0, 0, 240, 20, BLACK);
     M5.Lcd.setCursor(0, 0);
-    M5.Lcd.printf("Battery: %4d%%", battery);
+    M5.Lcd.printf("Battery: %f%%", battery);
   }
 
   if (tick % 60 == 0) {
@@ -27,6 +28,7 @@ void statusUpdate(unsigned long tick)
     int temp = getTemp();
     M5.Lcd.setCursor(0, 40);
     M5.Lcd.printf("Temp   : %3dc", temp);
+    sendCO2Data(ppm, temp);
   }
 
   if (tick % 180 == 0) {
@@ -75,6 +77,6 @@ void loop()
   if (M5.BtnA.isPressed())
   {
     toggleSwitch();
-    powerOff();
+    // powerOff();
   }
 }
