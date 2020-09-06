@@ -3,11 +3,11 @@
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
 
-#include "oursettings.h"
+// #include "oursettings.h"
 const char *INFO_PATH = "/zeroconf/info";
 const char *SWITCH_PATH = "/zeroconf/switch";
 
-String httpPost(const char *endpoint, const char *payload)
+String httpPostRes(const char *endpoint, const char *payload)
 {
   HTTPClient http;
   http.begin(endpoint);
@@ -15,29 +15,32 @@ String httpPost(const char *endpoint, const char *payload)
   int status = http.POST((uint8_t *)payload, strlen(payload));
   if (status == 200)
   {
-    String res = http.getString();
-    http.end();
-    return res;
+    if (http.connected()) {
+      String res = http.getString();
+      http.end();
+      return res;
+    }
   }
-  http.end();
+  if (http.connected()) http.end();
   return "";
+}
+
+void httpPost(const char *endpoint, const char *payload)
+{
+  HTTPClient http;
+  http.begin(endpoint);
+  http.addHeader("Content-Type", "application/json");
+  int status = http.POST((uint8_t *)payload, strlen(payload));
+  if (http.connected()) http.end();
+  return;
 }
 
 // Taken from https://make-muda.net/2019/09/6946/
 void updateBatteryInfo()
 {
-  uint16_t vbat = M5.Axp.GetVbatData() * 1.1 / 1000;
-  int8_t battery = int8_t((vbat - 3.0) / 1.2 * 100);
-  if (battery > 100)
-  {
-    battery = 100;
-  }
-  else if (battery < 0)
-  {
-    battery = 0;
-  }
+  float battery = M5.Axp.GetBatVoltage();
   M5.Lcd.setCursor(0, 5);
-  M5.Lcd.printf("Charge: %3d%%", battery);
+  M5.Lcd.printf("Charge: %.3f", battery);
 }
 
 bool getSwitchInfo()
@@ -46,7 +49,7 @@ bool getSwitchInfo()
   strcpy(endpoint, SONOFF_URL);
   strcat(endpoint, INFO_PATH);
 
-  String res = httpPost(endpoint, INFO_JSON);
+  String res = httpPostRes(endpoint, INFO_JSON);
   int offPos = res.indexOf("\"switch\":\"on\",");
   return offPos >= 0;
 }
@@ -81,6 +84,13 @@ void toggleSwitch()
   sendSwitchCommand(getSwitchInfo());
 }
 
+int status = 0;
+unsigned long lastStatusUpdateMs = 0;
+
+unsigned long lastMillis = 0;
+unsigned long tick = 0;
+unsigned long INTERVAL = 1000; // 1sec
+
 void setup()
 {
   M5.begin();
@@ -97,15 +107,19 @@ void setup()
   }
 
   M5.Lcd.fillScreen(BLACK);
+  status = 1;
 }
 
-void powerOff()
+void preparePowerOff()
 {
   M5.Lcd.fillScreen(BLACK);
   M5.Lcd.setTextSize(4);
   M5.Lcd.setCursor(0, 45);
   M5.Lcd.print("BYE");
-  delay(1000);
+}
+
+void doPowerOff()
+{
   M5.Axp.PowerOff();
 }
 
@@ -113,22 +127,50 @@ void statusUpdate(unsigned long tick)
 {
   if (tick % 10 != 0)
     return;
+  if (status != 1)
+    return;
 
   updateSwitchInfo();
   updateBatteryInfo();
 }
 
-void action() {
-  if (M5.BtnA.isPressed())
+int action(int status)
+{
+  if (status == 1)
   {
-    toggleSwitch();
-    powerOff();
+    if (M5.BtnA.wasPressed())
+    {
+      return status;
+    }
+    if (M5.BtnA.isPressed())
+    {
+      toggleSwitch();
+      lastStatusUpdateMs = millis();
+      return 2;
+    }
   }
-}
+  unsigned long currentMillis = millis();
+  if (status == 2)
+  {
+    if (currentMillis - lastStatusUpdateMs > INTERVAL * 2)
+    {
+      preparePowerOff();
+      lastStatusUpdateMs = millis();
+      return 3;
+    }
+  }
+  if (status == 3)
+  {
+    if (currentMillis - lastStatusUpdateMs > INTERVAL * 2)
+    {
+      doPowerOff();
+      lastStatusUpdateMs = millis();
+      return 4;
+    }
+  }
 
-unsigned long lastMillis = 0;
-unsigned long tick = 0;
-unsigned long INTERVAL = 1000; // 1sec
+  return status;
+}
 
 void loop()
 {
@@ -138,6 +180,6 @@ void loop()
   {
     statusUpdate(tick++);
   }
-  action();
+  status = action(status);
   lastMillis = millis();
 }
